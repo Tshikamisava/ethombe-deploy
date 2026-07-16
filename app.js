@@ -466,17 +466,31 @@ function getDatabaseUrl() {
   }
   return databaseUrl;
 }
+function isSupabaseUrl(url) {
+  return /supabase\.(co|com)/i.test(url);
+}
+function resolveSsl(connectionString) {
+  if (process.env.DATABASE_SSL === "false") return void 0;
+  const useSsl = process.env.DATABASE_SSL === "true" || isSupabaseUrl(connectionString);
+  if (!useSsl) return void 0;
+  const rejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === "true" ? true : process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === "false" ? false : !isSupabaseUrl(connectionString);
+  return { rejectUnauthorized };
+}
 function getPool() {
   if (!pool) {
+    const connectionString = getDatabaseUrl();
     pool = new Pool({
-      connectionString: getDatabaseUrl(),
-      ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false" } : void 0
+      connectionString,
+      ssl: resolveSsl(connectionString),
+      max: 5,
+      idleTimeoutMillis: 2e4,
+      connectionTimeoutMillis: 15e3
     });
   }
   return pool;
 }
 function isSqlEnabled() {
-  return Boolean(process.env.DATABASE_URL);
+  return Boolean(process.env.DATABASE_URL?.trim());
 }
 async function ensureSchema() {
   if (!schemaReady) {
@@ -538,14 +552,14 @@ async function deleteMemorial3(id) {
 // server/storage/index.ts
 var store = () => {
   const mode = (process.env.STORAGE_MODE || "").toLowerCase();
+  if (mode !== "file" && isSqlEnabled()) return sqlStorage_exports;
   if (mode === "file") return fileStorage_exports;
-  if (isSqlEnabled()) return sqlStorage_exports;
   return isFirebaseEnabled() ? firestoreStorage_exports : fileStorage_exports;
 };
 function getStorageBackend() {
   const mode = (process.env.STORAGE_MODE || "").toLowerCase();
+  if (mode !== "file" && isSqlEnabled()) return "sql";
   if (mode === "file") return "file";
-  if (isSqlEnabled()) return "sql";
   return isFirebaseEnabled() ? "firestore" : "file";
 }
 async function readMemorials4() {
@@ -940,7 +954,9 @@ async function uploadToLocalStorage(memorialId, folder, buffer, filename) {
   const filePath = import_path4.default.join(dir, storedName);
   import_fs4.default.writeFileSync(filePath, buffer);
   const relative = `memorials/${memorialId}/${folder}/${storedName}`;
-  return `/api/uploads/${relative}`;
+  const uploadPath = `/api/uploads/${relative}`;
+  const base = (process.env.PUBLIC_API_URL || "").replace(/\/$/, "");
+  return base ? `${base}${uploadPath}` : uploadPath;
 }
 function getUploadsRoot() {
   return UPLOADS_DIR;
