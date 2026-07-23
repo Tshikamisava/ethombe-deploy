@@ -955,7 +955,7 @@ async function uploadToLocalStorage(memorialId, folder, buffer, filename) {
   import_fs4.default.writeFileSync(filePath, buffer);
   const relative = `memorials/${memorialId}/${folder}/${storedName}`;
   const uploadPath = `/api/uploads/${relative}`;
-  const base = (process.env.PUBLIC_API_URL || "").replace(/\/$/, "");
+  const base = (process.env.PUBLIC_API_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
   return base ? `${base}${uploadPath}` : uploadPath;
 }
 function getUploadsRoot() {
@@ -983,11 +983,49 @@ function packageToPlateStyle(pkg) {
   if (pkg === "Premium") return "bronze";
   return "ceramic";
 }
+function publicApiOrigin(req) {
+  const fromEnv = (process.env.PUBLIC_API_URL || "").replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  if (req) {
+    const host = req.get("host");
+    if (host) {
+      const proto = (req.get("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim();
+      return `${proto}://${host}`;
+    }
+  }
+  return "";
+}
+function absolutizeMediaUrl(url, req) {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("blob:")) {
+    return url;
+  }
+  if (url.startsWith("/api/")) {
+    const origin = publicApiOrigin(req);
+    return origin ? `${origin}${url}` : url;
+  }
+  return url;
+}
+function withAbsoluteMedia(memorial, req) {
+  return {
+    ...memorial,
+    profileImage: absolutizeMediaUrl(memorial.profileImage, req),
+    headerImage: absolutizeMediaUrl(memorial.headerImage, req),
+    gallery: memorial.gallery?.map((item) => absolutizeMediaUrl(item, req)),
+    videoUrl: memorial.videoUrl ? absolutizeMediaUrl(memorial.videoUrl, req) : memorial.videoUrl,
+    proofOfPaymentUrl: memorial.proofOfPaymentUrl ? absolutizeMediaUrl(memorial.proofOfPaymentUrl, req) : memorial.proofOfPaymentUrl,
+    obituaryUrl: memorial.obituaryUrl ? absolutizeMediaUrl(memorial.obituaryUrl, req) : memorial.obituaryUrl,
+    legacyFiles: memorial.legacyFiles?.map((file) => ({
+      ...file,
+      url: file.url ? absolutizeMediaUrl(file.url, req) : file.url
+    }))
+  };
+}
 function createApp(options = {}) {
   const { serveUploads = true, serveStatic = false, staticDir: staticDir2 } = options;
   const app2 = (0, import_express.default)();
   function serializeMemorial(memorial, req) {
-    return sanitizeMemorial(memorial, isAdminRequest(req));
+    return withAbsoluteMedia(sanitizeMemorial(memorial, isAdminRequest(req)), req);
   }
   function getBearerToken(req) {
     const header = req.headers.authorization;
